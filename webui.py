@@ -2,13 +2,13 @@ import pdb
 import logging
 
 from dotenv import load_dotenv
-
 load_dotenv()
+
 import os
 import glob
 import asyncio
 import argparse
-import os
+import json  # for API output serialization
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,125 @@ from src.controller.custom_controller import CustomController
 from gradio.themes import Citrus, Default, Glass, Monochrome, Ocean, Origin, Soft, Base
 from src.utils.default_config_settings import default_config, load_config_from_file, save_config_to_file, save_current_config, update_ui_from_config
 from src.utils.utils import update_model_dropdown, get_latest_files, capture_screenshot
+
+# --------------------- FASTAPI IMPORTS & SETUP ---------------------
+from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+app = FastAPI(title="Browser Agent API")
+
+class RunRequest(BaseModel):
+    agent_type: str
+    llm_provider: str
+    llm_model_name: str
+    llm_temperature: float
+    llm_base_url: str
+    llm_api_key: str
+    use_own_browser: bool
+    keep_browser_open: bool
+    headless: bool
+    disable_security: bool
+    window_w: int
+    window_h: int
+    save_recording_path: str
+    save_agent_history_path: str
+    save_trace_path: str
+    enable_recording: bool
+    task: str
+    add_infos: str
+    max_steps: int
+    use_vision: bool
+    max_actions_per_step: int
+    tool_calling_method: str
+
+@app.post("/run_with_stream")
+async def run_with_stream_api(req: RunRequest):
+    """
+    POST endpoint to call the run_with_stream function.
+    It streams the outputs (JSON-serialized) as they are yielded.
+    """
+    async def event_generator():
+        # Call your existing run_with_stream function with parameters from the request.
+        async for output in run_with_stream(
+            agent_type=req.agent_type,
+            llm_provider=req.llm_provider,
+            llm_model_name=req.llm_model_name,
+            llm_temperature=req.llm_temperature,
+            llm_base_url=req.llm_base_url,
+            llm_api_key=req.llm_api_key,
+            use_own_browser=req.use_own_browser,
+            keep_browser_open=req.keep_browser_open,
+            headless=req.headless,
+            disable_security=req.disable_security,
+            window_w=req.window_w,
+            window_h=req.window_h,
+            save_recording_path=req.save_recording_path,
+            save_agent_history_path=req.save_agent_history_path,
+            save_trace_path=req.save_trace_path,
+            enable_recording=req.enable_recording,
+            task=req.task,
+            add_infos=req.add_infos,
+            max_steps=req.max_steps,
+            use_vision=req.use_vision,
+            max_actions_per_step=req.max_actions_per_step,
+            tool_calling_method=req.tool_calling_method
+        ):
+            # Use json.dumps with default=str to ensure non-serializable objects (e.g. gr.update) are handled.
+            yield json.dumps(output, default=str) + "\n"
+    return StreamingResponse(event_generator(), media_type="application/json")
+@app.post("/run_custom_agent")
+async def run_custom_agent_api(req: RunRequest):
+    """
+    POST endpoint to call the run_custom_agent function directly.
+    It returns a JSON response containing:
+      - final_result
+      - errors
+      - model_actions
+      - model_thoughts
+      - trace_file
+      - history_file
+    """
+    # Create the LLM model using the parameters provided in the request
+    llm = utils.get_llm_model(
+        provider=req.llm_provider,
+        model_name=req.llm_model_name,
+        temperature=req.llm_temperature,
+        base_url=req.llm_base_url,
+        api_key=req.llm_api_key,
+    )
+    
+    # Call run_custom_agent with the provided parameters
+    result = await run_custom_agent(
+        llm=llm,
+        use_own_browser=req.use_own_browser,
+        keep_browser_open=req.keep_browser_open,
+        headless=req.headless,
+        disable_security=req.disable_security,
+        window_w=req.window_w,
+        window_h=req.window_h,
+        save_recording_path=req.save_recording_path,
+        save_agent_history_path=req.save_agent_history_path,
+        save_trace_path=req.save_trace_path,
+        task=req.task,
+        add_infos=req.add_infos,
+        max_steps=req.max_steps,
+        use_vision=req.use_vision,
+        max_actions_per_step=req.max_actions_per_step,
+        tool_calling_method=req.tool_calling_method
+    )
+    
+    # run_custom_agent returns a tuple:
+    # (final_result, errors, model_actions, model_thoughts, trace_file, history_file)
+    return {
+        "final_result": result[0],
+        "errors": result[1],
+        "model_actions": result[2],
+        "model_thoughts": result[3],
+        "trace_file": result[4],
+        "history_file": result[5]
+    }
+# --------------------- END FASTAPI SETUP ---------------------
 
 
 # Global variables for persistence
@@ -493,7 +612,6 @@ async def run_with_stream(
             final_result = errors = model_actions = model_thoughts = ""
             latest_videos = trace = history_file = None
 
-
             # Periodically update the stream while the agent task is running
             while not agent_task.done():
                 try:
@@ -616,8 +734,18 @@ def create_ui(config, theme_name="Ocean"):
     }
     """
 
+    js = """
+    function refresh() {
+        const url = new URL(window.location);
+        if (url.searchParams.get('__theme') !== 'dark') {
+            url.searchParams.set('__theme', 'dark');
+            window.location.href = url.href;
+        }
+    }
+    """
+
     with gr.Blocks(
-            title="Browser Use WebUI", theme=theme_map[theme_name], css=css
+            title="Browser Use WebUI", theme=theme_map[theme_name], css=css, js=js
     ) as demo:
         with gr.Row():
             gr.Markdown(
@@ -951,17 +1079,26 @@ def create_ui(config, theme_name="Ocean"):
     return demo
 
 def main():
-    parser = argparse.ArgumentParser(description="Gradio UI for Browser Agent")
+    parser = argparse.ArgumentParser(description="Gradio UI / FastAPI for Browser Agent")
     parser.add_argument("--ip", type=str, default="127.0.0.1", help="IP address to bind to")
-    parser.add_argument("--port", type=int, default=7788, help="Port to listen on")
+    parser.add_argument("--port", type=int, default=7788, help="Port to listen on for the Gradio UI")
     parser.add_argument("--theme", type=str, default="Ocean", choices=theme_map.keys(), help="Theme to use for the UI")
     parser.add_argument("--dark-mode", action="store_true", help="Enable dark mode")
+    # New arguments for API mode:
+    parser.add_argument("--api", action="store_true", help="Run as API server (FastAPI) instead of launching the UI")
+    parser.add_argument("--api-port", type=int, default=8000, help="Port to run the API server on")
     args = parser.parse_args()
 
     config_dict = default_config()
 
-    demo = create_ui(config_dict, theme_name=args.theme)
-    demo.launch(server_name=args.ip, server_port=args.port)
+    if args.api:
+        # Run the FastAPI server.
+        # (You can start this with: python your_script.py --api)
+        import uvicorn
+        uvicorn.run(app, host=args.ip, port=args.api_port)
+    else:
+        demo = create_ui(config_dict, theme_name=args.theme)
+        demo.launch(server_name=args.ip, server_port=args.port)
 
 if __name__ == '__main__':
     main()

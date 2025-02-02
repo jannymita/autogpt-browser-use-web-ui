@@ -333,7 +333,25 @@ class CustomAgent(Agent):
                     ):  # if last step, we dont need to validate
                         if not await self._validate_output():
                             continue
+                    playwright_browser = self.browser_context.browser.playwright_browser  # Ensure this is correct.
 
+                    # Ensure the browser instance and context exist
+                    if not playwright_browser or not playwright_browser.contexts:
+                        return None  # No browser available
+
+                    # Get the active browser context
+                    playwright_context = playwright_browser.contexts[0]
+
+                    # Open a new blank page
+                    new_page = await playwright_context.new_page()
+
+                    # Get all existing pages
+                    pages = playwright_context.pages if playwright_context else []
+
+                    # Close all old pages except the newly opened one
+                    for page in pages:
+                        if page != new_page:
+                            await page.close()            
                     logger.info("✅ Task completed successfully")
                     break
             else:
