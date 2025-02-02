@@ -2,9 +2,7 @@ module.exports = {
   apps: [
     {
       name: "autogpt-browser-use-web-ui", // Name of the application
-      script: "webui.py", // Your Python script
-      interpreter: "python3", // Specify Python interpreter
-      interpreter_args: "-m venv .venv && source .venv/bin/activate && python3", // Activate the virtual environment and run the script
+      script: "source .venv/bin/activate && python webui.py", // Your Python script
       cwd: "./", // Current working directory
       watch: false, // Disable watching for changes (set to true if you want to watch and auto-restart on file changes)
       env: {
