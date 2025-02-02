@@ -256,6 +256,11 @@ async def run_custom_agent_api(req: RunRequest):
         "trace_file": result[4],
         "history_file": result[5]
     }
+
+from datetime import datetime
+@app.get("/")
+async def get_timestamp():
+    return {"ts": int(datetime.now().timestamp())}
 # --------------------- END FASTAPI SETUP ---------------------
 
 
