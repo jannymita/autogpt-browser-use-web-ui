@@ -47,11 +47,6 @@ class CustomBrowser(Browser):
         except requests.ConnectionError:
             logger.debug('No existing Chrome instance found, starting a new one')
 
-        print( [
-                self.config.chrome_instance_path,
-                '--remote-debugging-port=9222',
-            ] + self.config.extra_chromium_args)
-        print("---------------------------------------------------------")
         # Start a new Chrome instance
         subprocess.Popen(
             [
