@@ -41,6 +41,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 app = FastAPI(title="Browser Agent API")
+lock = asyncio.Lock()
 
 class RunRequest(BaseModel):
     agent_type: str
@@ -65,6 +66,96 @@ class RunRequest(BaseModel):
     use_vision: bool
     max_actions_per_step: int
     tool_calling_method: str
+
+class WrappedParams(BaseModel):
+    new_store_name: str
+    new_owner_email: str
+
+@app.post("/wrapped_run_custom_agent")
+async def wrapped_run_custom_agent_api(params: WrappedParams):
+    open_api_key = os.environ.get("OPENAI_API_KEY")
+    if not open_api_key:
+        raise ValueError("OPENAI_API_KEY environment variable not found.")
+
+    # Fixed JSON payload as provided.
+    payload = {
+        "agent_type": "custom",
+        "llm_provider": "openai",
+        "llm_model_name": "gpt-4o",
+        "llm_temperature": 1,
+        "llm_base_url": "",
+        "llm_api_key": open_api_key,
+        "use_own_browser": True,
+        "keep_browser_open": True,
+        "headless": False,
+        "disable_security": True,
+        "window_w": 1280,
+        "window_h": 1100,
+        "save_recording_path": "./tmp/record_videos",
+        "save_agent_history_path": "./tmp/agent_history",
+        "save_trace_path": "./tmp/traces",
+        "enable_recording": True,
+        "task": (
+            "Phase 1: \nOpen a new tab to https://partners.shopify.com/4110997/stores/new?store_type=client_store\n"
+            "If asked, Login with kaduriraghd@hotmail.com\nDollar@2025. \nRe-enter store name NhatTestStore000030\n"
+            "If store name is unavailable, complete \nClick on online only, and this customer is not from another tool.\n\n"
+            "Else, click on 'create development store'. If a redirect happens, you are good to open a new tab to "
+            "https://admin.shopify.com/store/{store_name}/settings/account?transfer_ownership=true\nIf it takes you to "
+            "another link, just click on the first account. Then, when redirected, click on 'continue with unsupported browser'.\n"
+            "For new store owner, enter:\nEmail: nhatvhn99@gmail.com\nFirst Name: Nhat\nLast Name: Vu\n"
+            "Password: Dollar@2025\nClick 'Transfer Store Ownership'. Done. Don't do anything else."
+        ),
+        "add_infos": "",
+        "max_steps": 100,
+        "use_vision": False,
+        "max_actions_per_step": 10,
+        "tool_calling_method": "auto"
+    }
+
+    # Replace the hardcoded store name and owner email with the provided values.
+    modified_task = payload["task"].replace("NhatTestStore000030", params.new_store_name) \
+                                   .replace("nhatvhn99@gmail.com", params.new_owner_email)
+    payload["task"] = modified_task
+
+    # Construct the LLM model.
+    llm = utils.get_llm_model(
+        provider=payload["llm_provider"],
+        model_name=payload["llm_model_name"],
+        temperature=payload["llm_temperature"],
+        base_url=payload["llm_base_url"],
+        api_key=payload["llm_api_key"],
+    )
+
+    # Call run_custom_agent with parameters from the payload.
+    result = await run_custom_agent(
+        llm=llm,
+        use_own_browser=payload["use_own_browser"],
+        keep_browser_open=payload["keep_browser_open"],
+        headless=payload["headless"],
+        disable_security=payload["disable_security"],
+        window_w=payload["window_w"],
+        window_h=payload["window_h"],
+        save_recording_path=payload["save_recording_path"],
+        save_agent_history_path=payload["save_agent_history_path"],
+        save_trace_path=payload["save_trace_path"],
+        task=payload["task"],
+        add_infos=payload["add_infos"],
+        max_steps=payload["max_steps"],
+        use_vision=payload["use_vision"],
+        max_actions_per_step=payload["max_actions_per_step"],
+        tool_calling_method=payload["tool_calling_method"]
+    )
+
+    # run_custom_agent returns:
+    # (final_result, errors, model_actions, model_thoughts, trace_file, history_file)
+    return {
+        "final_result": result[0],
+        "errors": result[1],
+        "model_actions": result[2],
+        "model_thoughts": result[3],
+        "trace_file": result[4],
+        "history_file": result[5]
+    }
 
 @app.post("/run_with_stream")
 async def run_with_stream_api(req: RunRequest):
@@ -152,11 +243,6 @@ async def run_custom_agent_api(req: RunRequest):
         "trace_file": result[4],
         "history_file": result[5]
     }
-
-from datetime import datetime
-@app.get("/")
-async def health_check():
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
 # --------------------- END FASTAPI SETUP ---------------------
 
 
@@ -345,82 +431,83 @@ async def run_org_agent(
         max_actions_per_step,
         tool_calling_method
 ):
-    try:
-        global _global_browser, _global_browser_context, _global_agent_state
-        
-        # Clear any previous stop request
-        _global_agent_state.clear_stop()
+    async with lock:    
+        try:
+            global _global_browser, _global_browser_context, _global_agent_state
+            
+            # Clear any previous stop request
+            _global_agent_state.clear_stop()
 
-        extra_chromium_args = [f"--window-size={window_w},{window_h}"]
-        if use_own_browser:
-            chrome_path = os.getenv("CHROME_PATH", None)
-            if chrome_path == "":
+            extra_chromium_args = [f"--window-size={window_w},{window_h}"]
+            if use_own_browser:
+                chrome_path = os.getenv("CHROME_PATH", None)
+                if chrome_path == "":
+                    chrome_path = None
+                chrome_user_data = os.getenv("CHROME_USER_DATA", None)
+                if chrome_user_data:
+                    extra_chromium_args += [f"--user-data-dir={chrome_user_data}"]
+            else:
                 chrome_path = None
-            chrome_user_data = os.getenv("CHROME_USER_DATA", None)
-            if chrome_user_data:
-                extra_chromium_args += [f"--user-data-dir={chrome_user_data}"]
-        else:
-            chrome_path = None
-            
-        if _global_browser is None:
-            _global_browser = Browser(
-                config=BrowserConfig(
-                    headless=headless,
-                    disable_security=disable_security,
-                    chrome_instance_path=chrome_path,
-                    extra_chromium_args=extra_chromium_args,
+                
+            if _global_browser is None:
+                _global_browser = Browser(
+                    config=BrowserConfig(
+                        headless=headless,
+                        disable_security=disable_security,
+                        chrome_instance_path=chrome_path,
+                        extra_chromium_args=extra_chromium_args,
+                    )
                 )
-            )
 
-        if _global_browser_context is None:
-            _global_browser_context = await _global_browser.new_context(
-                config=BrowserContextConfig(
-                    trace_path=save_trace_path if save_trace_path else None,
-                    save_recording_path=save_recording_path if save_recording_path else None,
-                    no_viewport=False,
-                    browser_window_size=BrowserContextWindowSize(
-                        width=window_w, height=window_h
-                    ),
+            if _global_browser_context is None:
+                _global_browser_context = await _global_browser.new_context(
+                    config=BrowserContextConfig(
+                        trace_path=save_trace_path if save_trace_path else None,
+                        save_recording_path=save_recording_path if save_recording_path else None,
+                        no_viewport=False,
+                        browser_window_size=BrowserContextWindowSize(
+                            width=window_w, height=window_h
+                        ),
+                    )
                 )
+                
+            agent = Agent(
+                task=task,
+                llm=llm,
+                use_vision=use_vision,
+                browser=_global_browser,
+                browser_context=_global_browser_context,
+                max_actions_per_step=max_actions_per_step,
+                tool_calling_method=tool_calling_method
             )
-            
-        agent = Agent(
-            task=task,
-            llm=llm,
-            use_vision=use_vision,
-            browser=_global_browser,
-            browser_context=_global_browser_context,
-            max_actions_per_step=max_actions_per_step,
-            tool_calling_method=tool_calling_method
-        )
-        history = await agent.run(max_steps=max_steps)
+            history = await agent.run(max_steps=max_steps)
 
-        history_file = os.path.join(save_agent_history_path, f"{agent.agent_id}.json")
-        agent.save_history(history_file)
+            history_file = os.path.join(save_agent_history_path, f"{agent.agent_id}.json")
+            agent.save_history(history_file)
 
-        final_result = history.final_result()
-        errors = history.errors()
-        model_actions = history.model_actions()
-        model_thoughts = history.model_thoughts()
+            final_result = history.final_result()
+            errors = history.errors()
+            model_actions = history.model_actions()
+            model_thoughts = history.model_thoughts()
 
-        trace_file = get_latest_files(save_trace_path)
+            trace_file = get_latest_files(save_trace_path)
 
-        return final_result, errors, model_actions, model_thoughts, trace_file.get('.zip'), history_file
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        errors = str(e) + "\n" + traceback.format_exc()
-        return '', errors, '', '', None, None
-    finally:
-        # Handle cleanup based on persistence configuration
-        if not keep_browser_open:
-            if _global_browser_context:
-                await _global_browser_context.close()
-                _global_browser_context = None
+            return final_result, errors, model_actions, model_thoughts, trace_file.get('.zip'), history_file
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            errors = str(e) + "\n" + traceback.format_exc()
+            return '', errors, '', '', None, None
+        finally:
+            # Handle cleanup based on persistence configuration
+            if not keep_browser_open:
+                if _global_browser_context:
+                    await _global_browser_context.close()
+                    _global_browser_context = None
 
-            if _global_browser:
-                await _global_browser.close()
-                _global_browser = None
+                if _global_browser:
+                    await _global_browser.close()
+                    _global_browser = None
 
 async def run_custom_agent(
         llm,
@@ -440,91 +527,92 @@ async def run_custom_agent(
         max_actions_per_step,
         tool_calling_method
 ):
-    try:
-        global _global_browser, _global_browser_context, _global_agent_state
+    async with lock:
+        try:
+            global _global_browser, _global_browser_context, _global_agent_state
 
-        # Clear any previous stop request
-        _global_agent_state.clear_stop()
+            # Clear any previous stop request
+            _global_agent_state.clear_stop()
 
-        extra_chromium_args = [f"--window-size={window_w},{window_h}"]
-        if use_own_browser:
-            chrome_path = os.getenv("CHROME_PATH", None)
-            if chrome_path == "":
+            extra_chromium_args = [f"--window-size={window_w},{window_h}"]
+            if use_own_browser:
+                chrome_path = os.getenv("CHROME_PATH", None)
+                if chrome_path == "":
+                    chrome_path = None
+                chrome_user_data = os.getenv("CHROME_USER_DATA", None)
+                if chrome_user_data:
+                    extra_chromium_args += [f"--user-data-dir={chrome_user_data}"]
+            else:
                 chrome_path = None
-            chrome_user_data = os.getenv("CHROME_USER_DATA", None)
-            if chrome_user_data:
-                extra_chromium_args += [f"--user-data-dir={chrome_user_data}"]
-        else:
-            chrome_path = None
 
-        controller = CustomController()
+            controller = CustomController()
 
-        # Initialize global browser if needed
-        if _global_browser is None:
-            _global_browser = CustomBrowser(
-                config=BrowserConfig(
-                    headless=headless,
-                    disable_security=disable_security,
-                    chrome_instance_path=chrome_path,
-                    extra_chromium_args=extra_chromium_args,
+            # Initialize global browser if needed
+            if _global_browser is None:
+                _global_browser = CustomBrowser(
+                    config=BrowserConfig(
+                        headless=headless,
+                        disable_security=disable_security,
+                        chrome_instance_path=chrome_path,
+                        extra_chromium_args=extra_chromium_args,
+                    )
                 )
-            )
 
-        if _global_browser_context is None:
-            _global_browser_context = await _global_browser.new_context(
-                config=BrowserContextConfig(
-                    trace_path=save_trace_path if save_trace_path else None,
-                    save_recording_path=save_recording_path if save_recording_path else None,
-                    no_viewport=False,
-                    browser_window_size=BrowserContextWindowSize(
-                        width=window_w, height=window_h
-                    ),
+            if _global_browser_context is None:
+                _global_browser_context = await _global_browser.new_context(
+                    config=BrowserContextConfig(
+                        trace_path=save_trace_path if save_trace_path else None,
+                        save_recording_path=save_recording_path if save_recording_path else None,
+                        no_viewport=False,
+                        browser_window_size=BrowserContextWindowSize(
+                            width=window_w, height=window_h
+                        ),
+                    )
                 )
+                
+            # Create and run agent
+            agent = CustomAgent(
+                task=task,
+                add_infos=add_infos,
+                use_vision=use_vision,
+                llm=llm,
+                browser=_global_browser,
+                browser_context=_global_browser_context,
+                controller=controller,
+                system_prompt_class=CustomSystemPrompt,
+                agent_prompt_class=CustomAgentMessagePrompt,
+                max_actions_per_step=max_actions_per_step,
+                agent_state=_global_agent_state,
+                tool_calling_method=tool_calling_method
             )
-            
-        # Create and run agent
-        agent = CustomAgent(
-            task=task,
-            add_infos=add_infos,
-            use_vision=use_vision,
-            llm=llm,
-            browser=_global_browser,
-            browser_context=_global_browser_context,
-            controller=controller,
-            system_prompt_class=CustomSystemPrompt,
-            agent_prompt_class=CustomAgentMessagePrompt,
-            max_actions_per_step=max_actions_per_step,
-            agent_state=_global_agent_state,
-            tool_calling_method=tool_calling_method
-        )
-        history = await agent.run(max_steps=max_steps)
+            history = await agent.run(max_steps=max_steps)
 
-        history_file = os.path.join(save_agent_history_path, f"{agent.agent_id}.json")
-        agent.save_history(history_file)
+            history_file = os.path.join(save_agent_history_path, f"{agent.agent_id}.json")
+            agent.save_history(history_file)
 
-        final_result = history.final_result()
-        errors = history.errors()
-        model_actions = history.model_actions()
-        model_thoughts = history.model_thoughts()
+            final_result = history.final_result()
+            errors = history.errors()
+            model_actions = history.model_actions()
+            model_thoughts = history.model_thoughts()
 
-        trace_file = get_latest_files(save_trace_path)        
+            trace_file = get_latest_files(save_trace_path)        
 
-        return final_result, errors, model_actions, model_thoughts, trace_file.get('.zip'), history_file
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        errors = str(e) + "\n" + traceback.format_exc()
-        return '', errors, '', '', None, None
-    finally:
-        # Handle cleanup based on persistence configuration
-        if not keep_browser_open:
-            if _global_browser_context:
-                await _global_browser_context.close()
-                _global_browser_context = None
+            return final_result, errors, model_actions, model_thoughts, trace_file.get('.zip'), history_file
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            errors = str(e) + "\n" + traceback.format_exc()
+            return '', errors, '', '', None, None
+        finally:
+            # Handle cleanup based on persistence configuration
+            if not keep_browser_open:
+                if _global_browser_context:
+                    await _global_browser_context.close()
+                    _global_browser_context = None
 
-            if _global_browser:
-                await _global_browser.close()
-                _global_browser = None
+                if _global_browser:
+                    await _global_browser.close()
+                    _global_browser = None
 
 async def run_with_stream(
     agent_type,
