@@ -152,6 +152,11 @@ async def run_custom_agent_api(req: RunRequest):
         "trace_file": result[4],
         "history_file": result[5]
     }
+
+from datetime import datetime
+@app.get("/healthz")
+async def health_check():
+    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
 # --------------------- END FASTAPI SETUP ---------------------
 
 
