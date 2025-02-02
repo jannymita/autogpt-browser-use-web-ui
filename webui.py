@@ -110,7 +110,7 @@ async def wrapped_run_custom_agent_api(params: WrappedParams):
             "Else, click on 'create development store'. If a redirect happens, you are good to open a new tab to "
             "https://admin.shopify.com/store/{store_name}/settings/account?transfer_ownership=true\nIf it takes you to "
             "another link, just click on the first account. Then, when redirected, click on 'continue with unsupported browser'.\n"
-            "For new store owner, enter:\nEmail: nhatvhn99@gmail.com\nFirst Name: First\nLast Name: Last\n"
+            "Wait for 30s before continue. For new store owner, enter:\nEmail: nhatvhn99@gmail.com\nFirst Name: First\nLast Name: Last\n"
             "Password: Dollar@2025\nClick 'Transfer Store Ownership'. Done. Don't do anything else."
         ),
         "add_infos": "",
