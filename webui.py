@@ -130,6 +130,10 @@ async def wrapped_run_custom_agent_api(params: WrappedParams):
                                    .replace("Dollar@2025", shopify_partner_password)
     payload["task"] = modified_task
 
+    print("---------------------------  Payload ---------------------------")
+    print("Payload:", json.dumps(payload, indent=4))
+    print("---------------------------  Payload ---------------------------")
+
     # Construct the LLM model.
     llm = utils.get_llm_model(
         provider=payload["llm_provider"],
