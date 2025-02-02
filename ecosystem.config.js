@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "python-webserver", // Name of the application
+      name: "autogpt-browser-use-web-ui", // Name of the application
       script: "webui.py", // Your Python script
       interpreter: "python3", // Specify Python interpreter
       interpreter_args: "-m venv .venv && source .venv/bin/activate && python3", // Activate the virtual environment and run the script
