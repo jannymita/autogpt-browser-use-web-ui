@@ -7,6 +7,9 @@ module.exports = {
       cwd: "./", // Current working directory
       watch: false, // Disable watching for changes (set to true if you want to watch and auto-restart on file changes)
       log_file: "./logs/webserver.log", // Optional log file path
+      env: {
+        DISPLAY: ":1",
+      },
     },
     {
       name: "autogpt-browser-use-fastapi", // Name of the application
@@ -16,6 +19,9 @@ module.exports = {
       cwd: "./", // Current working directory
       watch: false, // Disable watching for changes (set to true if you want to watch and auto-restart on file changes)
       log_file: "./logs/webserver.log", // Optional log file path
+      env: {
+        DISPLAY: ":1",
+      },
     },
   ],
 };

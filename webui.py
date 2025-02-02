@@ -84,6 +84,8 @@ async def wrapped_run_custom_agent_api(params: WrappedParams):
     shopify_partner_email = os.environ.get("SHOPIFY_PARTNER_EMAIL")
     if not shopify_partner_email:
         raise ValueError("SHOPIFY_PARTNER_EMAIL environment variable not found.")
+    
+    shopify_partner_password = os.environ.get("SHOPIFY_PARTNER_PASSWORD", "Dollar@2025")
 
     # Fixed JSON payload as provided.
     payload = {
@@ -123,8 +125,9 @@ async def wrapped_run_custom_agent_api(params: WrappedParams):
     # Replace the hardcoded store name and owner email with the provided values.
     modified_task = payload["task"].replace("NhatTestStore000030", params.new_store_name) \
                                    .replace("nhatvhn99@gmail.com", params.new_owner_email) \
+                                   .replace("4110997", shopify_partner_id) \
                                    .replace("kaduriraghd@hotmail.com", shopify_partner_email) \
-                                   .replace("4110997", shopify_partner_id)
+                                   .replace("Dollar@2025", shopify_partner_password)
     payload["task"] = modified_task
 
     # Construct the LLM model.
