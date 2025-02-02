@@ -8,5 +8,14 @@ module.exports = {
       watch: false, // Disable watching for changes (set to true if you want to watch and auto-restart on file changes)
       log_file: "./logs/webserver.log", // Optional log file path
     },
+    {
+      name: "autogpt-browser-use-fastapi", // Name of the application
+      script: "webui.py", // Your Python script
+      args: ["--api"],
+      interpreter: ".venv/bin/python", // Specify Python interpreter
+      cwd: "./", // Current working directory
+      watch: false, // Disable watching for changes (set to true if you want to watch and auto-restart on file changes)
+      log_file: "./logs/webserver.log", // Optional log file path
+    },
   ],
 };
